@@ -9,32 +9,24 @@ log = logging.getLogger("notifier")
 
 API_URL = "https://api.telegram.org/bot{token}/{method}"
 
-SEVERITY_TEXT = {1: "Baja", 2: "Media", 3: "Alta", 4: "Critica", 5: "EMERGENCIA"}
-
 TITLES = {
-    "file_access": "Lectura de archivo sensible",
-    "auth": "Evento de autenticacion",
-    "command": "Ejecucion de comando",
-    "docker": "Uso del socket de Docker",
-    "db": "Operacion sensible en base de datos",
-    "config_change": "Cambio de configuracion critica",
-    "agent_tamper": "Intento de manipular el agente",
-    "honeytoken_trigger": "Honeytoken disparado",
-    "network_flow": "Flujo de red rechazado",
-    "http": "Acceso HTTP",
+    "http.request": "Acceso HTTP",
+    "auth.attempt": "Intento de autenticacion",
+    "file.access": "Lectura de archivo",
+    "command.exec": "Ejecucion de comando",
+    "sql.statement": "Operacion en base de datos",
+    "session": "Apertura o cierre de sesion",
+    "agent.malformed": "Lote rechazado por el colector",
 }
 
 COOLDOWN = {
-    "file_access": 0,
-    "auth": 60,
-    "command": 0,
-    "docker": 120,
-    "db": 60,
-    "config_change": 0,
-    "agent_tamper": 0,
-    "honeytoken_trigger": 0,
-    "network_flow": 300,
-    "http": 0,
+    "http.request": 60,
+    "auth.attempt": 60,
+    "file.access": 0,
+    "command.exec": 0,
+    "sql.statement": 60,
+    "session": 120,
+    "agent.malformed": 0,
 }
 
 
@@ -86,11 +78,11 @@ class TelegramNotifier:
                 return False
         return False
 
-    def _in_cooldown(self, honeypot_code: str, category: str) -> bool:
-        seconds = COOLDOWN.get(category, 30)
+    def _in_cooldown(self, honeypot_code: str, event_type: str) -> bool:
+        seconds = COOLDOWN.get(event_type, 30)
         if seconds == 0:
             return False
-        key = (honeypot_code, category)
+        key = (honeypot_code, event_type)
         now = time.time()
         if now - self._cooldowns.get(key, 0) < seconds:
             return True
@@ -98,18 +90,18 @@ class TelegramNotifier:
         return False
 
     async def notify(self, event: dict) -> None:
-        category = event.get("category", "unknown")
+        event_type = event.get("event_type", "unknown")
         honeypot_code = event.get("sensor", "?")
 
-        if self._in_cooldown(honeypot_code, category):
+        if self._in_cooldown(honeypot_code, event_type):
             return
 
         await self.send(self.format_event(event))
 
     def format_event(self, e: dict) -> str:
         sev = int(e.get("severity", 1))
-        level = SEVERITY_TEXT.get(sev, "Baja")
-        title = TITLES.get(e.get("category"), "Evento")
+        level = e.get("severity_text", "Baja")
+        title = TITLES.get(e.get("event_type"), "Evento")
         lines = [
             f"<b>{esc(title)}</b>",
             f"Severidad: {esc(level)} ({sev}/5)",
@@ -125,8 +117,6 @@ class TelegramNotifier:
             lines.append(f"Ruta: <code>{esc(e['path'], 300)}</code>")
         if e.get("detail"):
             lines.append(f"Detalle: {esc(e['detail'], 300)}")
-        if e.get("stage"):
-            lines.append(f"Contexto: <b>{esc(e['stage'])}</b>")
         lines.append(f"Hora: {esc(e.get('time', time.strftime('%Y-%m-%d %H:%M:%S')))}")
         return "\n".join(lines)
 

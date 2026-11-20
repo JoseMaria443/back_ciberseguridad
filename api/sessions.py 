@@ -1,0 +1,68 @@
+async def resolve_session_id(conn, honeypot_id: int, boot_id, session_ref: str | None):
+    if session_ref is None:
+        return None
+
+    row = await conn.fetchrow(
+        """
+        SELECT id FROM sessions
+        WHERE honeypot_id = $1 AND boot_id = $2 AND session_ref = $3
+        """,
+        honeypot_id,
+        boot_id,
+        session_ref,
+    )
+    if row is not None:
+        return row["id"]
+
+    row = await conn.fetchrow(
+        """
+        INSERT INTO sessions (honeypot_id, boot_id, session_ref, kind, started_at)
+        VALUES ($1, $2, $3, 'unknown', now())
+        ON CONFLICT (honeypot_id, boot_id, session_ref) DO UPDATE SET session_ref = EXCLUDED.session_ref
+        RETURNING id
+        """,
+        honeypot_id,
+        boot_id,
+        session_ref,
+    )
+    return row["id"]
+
+
+async def apply_session_event(conn, honeypot_id: int, boot_id, event):
+    session_ref = event.session_ref
+    data = event.data
+
+    if session_ref is None:
+        return None
+
+    if data.action == "open":
+        row = await conn.fetchrow(
+            """
+            INSERT INTO sessions
+                (honeypot_id, boot_id, session_ref, kind, source_ip, auth_user, auth_method, started_at)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            ON CONFLICT (honeypot_id, boot_id, session_ref) DO UPDATE SET
+                kind = EXCLUDED.kind,
+                source_ip = EXCLUDED.source_ip,
+                auth_user = EXCLUDED.auth_user,
+                auth_method = EXCLUDED.auth_method
+            RETURNING id
+            """,
+            honeypot_id,
+            boot_id,
+            session_ref,
+            data.kind,
+            str(event.src_ip) if event.src_ip else None,
+            data.auth_user,
+            data.auth_method,
+            event.occurred_at,
+        )
+        return row["id"]
+
+    session_id = await resolve_session_id(conn, honeypot_id, boot_id, session_ref)
+    await conn.execute(
+        "UPDATE sessions SET ended_at = $1 WHERE id = $2",
+        event.occurred_at,
+        session_id,
+    )
+    return session_id

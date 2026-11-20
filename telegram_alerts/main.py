@@ -1,12 +1,12 @@
 import asyncio
 import logging
 
-import asyncpg
-
 from config import Config
 from notifier import TelegramNotifier
 from commands import CommandListener
 from listener import run_listener, estado_handler, build_dsn
+
+import asyncpg
 
 logging.basicConfig(level=logging.INFO)
 
